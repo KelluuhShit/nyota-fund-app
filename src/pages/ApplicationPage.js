@@ -155,7 +155,6 @@ export default function ApplicationPage() {
                   {errors.phone && <p className="text-red-600 text-sm mt-1">{errors.phone}</p>}
                 </div>
 
-                {/* ID Number */}
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">
                     <IdCard className="inline w-5 h-5 mr-2 text-kenya-green" /> National ID Number
