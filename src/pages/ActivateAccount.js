@@ -1,15 +1,18 @@
 // src/pages/ActivateAccount.js
 import React, { useState, useEffect } from 'react';
-import { Check, Lock, Phone, AlertCircle,Star } from 'lucide-react';
+import { Check, Lock, Phone, AlertCircle, Star, Loader2, XCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function ActivateAccount() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
   const [applicationData, setApplicationData] = useState(null);
   const [fundingAmount, setFundingAmount] = useState(0);
+  const [clientReference] = useState(`NYOTA-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
 
   useEffect(() => {
     const data = localStorage.getItem('nyotaApplication');
@@ -27,19 +30,77 @@ export default function ActivateAccount() {
 
   const formatAmount = (amount) => amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-  const handleActivate = () => {
+  // Poll payment status — NOW HANDLES FAILED & CANCELLED
+  const checkPaymentStatus = async (reference) => {
+    try {
+      const res = await fetch(`/api/transaction-status?reference=${reference}`);
+      const data = await res.json();
+
+      if (!data.success) {
+        setCheckingPayment(false);
+        setError('Payment status check failed. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      if (data.status === 'SUCCESS') {
+        setCheckingPayment(false);
+        setSuccess(true);
+        localStorage.setItem('nyotaAccountActivated', 'true');
+        localStorage.setItem('nyotaActivatedPhone', phone);
+        localStorage.setItem('nyotaPaymentReference', reference);
+      } 
+      else if (data.status === 'FAILED' || data.status === 'CANCELLED') {
+        setCheckingPayment(false);
+        setLoading(false);
+        setError('Payment failed or was cancelled. Please try again.');
+      } 
+      else if (data.status === 'QUEUED') {
+        // Still waiting — poll again
+        setTimeout(() => checkPaymentStatus(reference), 3000);
+      }
+    } catch (err) {
+      console.error('Status check failed:', err);
+      setTimeout(() => checkPaymentStatus(reference), 5000);
+    }
+  };
+
+  const handleActivate = async () => {
     if (!phone || phone.length !== 10) {
       alert("Please enter a valid 10-digit phone number");
       return;
     }
 
     setLoading(true);
-    setTimeout(() => {
+    setError('');
+    setCheckingPayment(false);
+
+    try {
+      const response = await fetch('/api/stk-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: phone,
+          amount: 250,
+          reference: clientReference,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setLoading(false);
+        setCheckingPayment(true);
+        checkPaymentStatus(result.payheroReference || result.clientReference);
+      } else {
+        setLoading(false);
+        setError(result.error || 'Failed to send payment request. Try again.');
+      }
+    } catch (err) {
       setLoading(false);
-      setSuccess(true);
-      localStorage.setItem('nyotaAccountActivated', 'true');
-      localStorage.setItem('nyotaActivatedPhone', phone);
-    }, 3000);
+      setError('Network error. Check your connection and try again.');
+      console.error('STK Push failed:', err);
+    }
   };
 
   if (!applicationData) return null;
@@ -77,9 +138,9 @@ export default function ActivateAccount() {
                 <div className="flex gap-3">
                   <AlertCircle className="w-6 h-6 text-amber-600 flex-shrink-0" />
                   <div>
-                    <p className="font-bold text-kenya-black">Activation Fee Required</p>
+                    <p className="font-bold text-kenya-black">Activation Fee: KSh 250</p>
                     <p className="text-sm text-gray-700">
-                      A one-time activation fee of <strong>KSh 250 only</strong> is required to secure and activate your Nyota Youth Fund account.
+                      Pay a one-time fee to activate your Nyota Youth Fund account.
                     </p>
                   </div>
                 </div>
@@ -89,28 +150,44 @@ export default function ActivateAccount() {
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">
                     <Phone className="inline w-5 h-5 mr-2 text-kenya-green" />
-                    M-Pesa Phone Number (Editable)
+                    M-Pesa Phone Number
                   </label>
                   <input
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                    className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:border-kenya-green focus:outline-none transition text-lg text-center font-mono"
+                    className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:border-kenya-green focus:outline-none text-lg text-center font-mono"
                     placeholder="0712345678"
                     maxLength="10"
+                    disabled={loading || checkingPayment}
                   />
                   <p className="text-xs text-gray-500 mt-2 text-center">
-                    Your M-Pesa number will receive KSh {formatAmount(fundingAmount)} in 72 hours
+                    You will receive an M-Pesa prompt on this number
                   </p>
                 </div>
 
+                {error && (
+                  <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
+                    <XCircle className="w-5 h-5" />
+                    {error}
+                  </div>
+                )}
+
                 <button
                   onClick={handleActivate}
-                  disabled={loading || phone.length !== 10}
+                  disabled={loading || checkingPayment || phone.length !== 10}
                   className="w-full bg-kenya-green hover:bg-green-700 text-white font-black text-xl py-5 rounded-full shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-3"
                 >
-                  {loading ? (
-                    <>Processing... <div className="animate-spin"><Lock className="w-6 h-6" /></div></>
+                  {checkingPayment ? (
+                    <>
+                      <Loader2 className="w-7 h-7 animate-spin" />
+                      Waiting for Payment...
+                    </>
+                  ) : loading ? (
+                    <>
+                      <Loader2 className="w-7 h-7 animate-spin" />
+                      Sending STK Push...
+                    </>
                   ) : (
                     <>
                       <Lock className="w-7 h-7" />
@@ -119,26 +196,32 @@ export default function ActivateAccount() {
                   )}
                 </button>
 
-                <p className="text-xs text-gray-500 text-center mt-4">
-                  You will receive an M-Pesa prompt shortly after clicking
-                </p>
+                {checkingPayment && (
+                  <p className="text-center text-sm text-gray-600 animate-pulse mt-4">
+                    Please enter your M-Pesa PIN on your phone
+                  </p>
+                )}
               </div>
             </>
           ) : (
+            /* SUCCESS STATE */
             <>
               <div className="text-center">
                 <div className="w-24 h-24 bg-kenya-green rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
                   <Check className="w-16 h-16 text-white" />
                 </div>
                 <h2 className="text-3xl font-black text-kenya-black mb-4">
-                  Account Activated Successfully!
+                  Payment Successful!
                 </h2>
+                <p className="text-2xl font-bold text-kenya-green mb-4">
+                  Account Activated
+                </p>
                 <p className="text-xl font-bold text-kenya-green mb-6">
                   KSh {formatAmount(fundingAmount)} Coming in 72 Hours!
                 </p>
                 <p className="text-gray-700 mb-8">
                   Congratulations <strong>{applicationData.fullName}</strong>!<br />
-                  Your Nyota Youth Fund account is now fully activated.
+                  Your Nyota Youth Fund is now fully activated.
                 </p>
 
                 <Link to="/">
@@ -147,10 +230,11 @@ export default function ActivateAccount() {
                   </button>
                 </Link>
 
-                <div className="mt-8 p-5 bg-gray-50 rounded-xl">
+                <div className="mt-8 p-5 bg-gray-50 rounded-xl text-left">
                   <p className="text-sm text-gray-600">
-                    <strong>Reference ID:</strong> NYOTA{Date.now().toString().slice(-6)}<br />
-                    <strong>Activated On:</strong> {new Date().toLocaleString('en-KE')}
+                    <strong>Reference ID:</strong> {clientReference}<br />
+                    <strong>Activated On:</strong> {new Date().toLocaleString('en-KE')}<br />
+                    <strong>Payment:</strong> KSh 250 (Confirmed)
                   </p>
                 </div>
               </div>
