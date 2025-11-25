@@ -6,8 +6,8 @@ const axios = require('axios');
 
 module.exports = async (req, res) => {
   const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3000',
+    'https://nyota-youth-funds.vercel.app',
+    'https://nyota-youth-funds.vercel.app',
   ];
   const origin = req.headers.origin;
 
